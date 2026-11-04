@@ -1,0 +1,7 @@
+[env]
+# raylib's native Visual Studio project can fail when its first build launches
+# many MSBuild jobs at once. It is only compiled once, so reliability wins here.
+CMAKE_BUILD_PARALLEL_LEVEL = "1"
+
+[build]
+jobs = 1
