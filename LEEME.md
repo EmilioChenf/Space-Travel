@@ -7,13 +7,12 @@ depuración y para copiar el framebuffer a la pantalla.
 
 ## Lo que ya funciona
 
-- Carga propia de modelos OBJ/MTL (incluye el DeLorean en
-  `recursos/modelos/nave_espacial/delorean/`).
+- Carga propia de modelos OBJ/MTL para el DeLorean, Oasis y Hielo.
 - Pipeline modelo → vista → proyección y rasterización por coordenadas baricéntricas.
 - Interpolación con corrección de perspectiva y z-buffer.
-- Shader CPU metálico para la nave.
+- Iluminación CPU que conserva los materiales exportados desde Blender.
 - Shader CPU procedural y animado para el sol.
-- Planeta procedural que orbita al sol y rota según el tiempo transcurrido.
+- Planetas Oasis y Hielo con órbitas, rotaciones e iluminación diferenciadas.
 - Cámara en tercera persona, vuelo con aceleración/frenado y colisión esférica básica.
 - Cuatro propulsores procedurales bajo las ruedas, con llamas animadas e
   iluminación azul sobre la nave.
@@ -41,24 +40,26 @@ compilaciones son incrementales.
 | `A` / `D` | Girar a izquierda / derecha |
 | `↑` / `↓` | Inclinar la nariz |
 | `Q` / `E` | Alabeo |
+| `Espacio` | Frenar rápidamente sin entrar en reversa |
 | `Shift izquierdo` | Aumentar la velocidad máxima |
 | `R` | Reiniciar nave |
 
 ## Estructura
 
 - `src/math3d.rs`: vectores, matrices, cámara y transformaciones.
-- `src/model.rs`: lector OBJ/MTL y esfera generada proceduralmente.
+- `src/model.rs`: lector OBJ/MTL y geometría procedural reutilizable.
 - `src/renderer.rs`: framebuffer, z-buffer, rasterizador y shaders CPU.
 - `src/main.rs`: escena, órbita, controles, cámara y presentación con raylib.
 - `src/assets.rs`: rutas centralizadas y localización de recursos.
-- `recursos/modelos/nave_espacial/delorean/`: modelo OBJ y material MTL de la nave.
+- `recursos/modelos/nave_espacial/delorean/`: `delorean.obj` y `delorean.mtl`.
+- `recursos/modelos/planetas/oasis/`: `oasis.obj` y `oasis.mtl`.
+- `recursos/modelos/planetas/hielo/`: `Hielo.obj` y `Hielo.mtl`.
 
 ## Próximos pasos sugeridos
 
 1. Añadir clipping de triángulos contra el plano cercano.
-2. Crear un segundo planeta con identidad visual y geometría diferente.
-3. Colocar objetos propios sobre la superficie curva del planeta.
-4. Añadir frustum culling y niveles de detalle, usando los contadores actuales
+2. Integrar los planetas restantes con identidades visuales diferentes.
+3. Añadir frustum culling y niveles de detalle, usando los contadores actuales
    para demostrar la reducción de trabajo.
-5. Completar aquí los integrantes, contribuciones, recursos externos y asistencia
+4. Completar aquí los integrantes, contribuciones, recursos externos y asistencia
    de IA antes de la entrega.
