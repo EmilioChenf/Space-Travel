@@ -221,6 +221,34 @@ impl Mat4 {
         let value = self * Vec4::new(direction.x, direction.y, direction.z, 0.0);
         Vec3::new(value.x, value.y, value.z)
     }
+
+    /// Transforma una normal con la inversa transpuesta de la matriz 3x3.
+    /// Esto mantiene correcta la iluminación cuando un modelo usa escala no uniforme.
+    pub fn transform_normal(self, normal: Vec3) -> Vec3 {
+        let a = self.m;
+        let cofactor = [
+            [
+                a[1][1] * a[2][2] - a[1][2] * a[2][1],
+                -(a[1][0] * a[2][2] - a[1][2] * a[2][0]),
+                a[1][0] * a[2][1] - a[1][1] * a[2][0],
+            ],
+            [
+                -(a[0][1] * a[2][2] - a[0][2] * a[2][1]),
+                a[0][0] * a[2][2] - a[0][2] * a[2][0],
+                -(a[0][0] * a[2][1] - a[0][1] * a[2][0]),
+            ],
+            [
+                a[0][1] * a[1][2] - a[0][2] * a[1][1],
+                -(a[0][0] * a[1][2] - a[0][2] * a[1][0]),
+                a[0][0] * a[1][1] - a[0][1] * a[1][0],
+            ],
+        ];
+        Vec3::new(
+            cofactor[0][0] * normal.x + cofactor[0][1] * normal.y + cofactor[0][2] * normal.z,
+            cofactor[1][0] * normal.x + cofactor[1][1] * normal.y + cofactor[1][2] * normal.z,
+            cofactor[2][0] * normal.x + cofactor[2][1] * normal.y + cofactor[2][2] * normal.z,
+        )
+    }
 }
 
 impl Default for Mat4 {

@@ -384,6 +384,26 @@ mod tests {
     }
 
     #[test]
+    fn loads_the_oasis_obj() {
+        let path = crate::assets::locate(crate::assets::OASIS_OBJ);
+        let mesh = load_obj(path).expect("Oasis debe ser un OBJ válido");
+        assert!(
+            mesh.triangles.len() >= 160_000,
+            "se esperaba el modelo completo de Oasis"
+        );
+    }
+
+    #[test]
+    fn loads_the_ice_planet_obj() {
+        let path = crate::assets::locate(crate::assets::HIELO_OBJ);
+        let mesh = load_obj(path).expect("Hielo debe ser un OBJ válido");
+        assert!(
+            mesh.triangles.len() >= 9_000,
+            "se esperaba el modelo completo del planeta de hielo"
+        );
+    }
+
+    #[test]
     fn creates_thruster_geometry() {
         assert_eq!(make_thruster_nozzle(16).triangles.len(), 32);
         assert_eq!(make_thruster_flame(16).triangles.len(), 16);
