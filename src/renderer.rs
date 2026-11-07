@@ -4,7 +4,8 @@ use crate::model::{Color3, Mesh};
 #[derive(Clone, Copy)]
 pub enum ShaderKind {
     Metal,
-    Planet,
+    Lit,
+    Ice,
     Sun,
     Thruster,
 }
@@ -118,7 +119,7 @@ impl SoftwareRenderer {
                     clip: mvp
                         * Vec4::new(input.position.x, input.position.y, input.position.z, 1.0),
                     world_position: model.transform_point(input.position),
-                    world_normal: model.transform_direction(input.normal).normalized(),
+                    world_normal: model.transform_normal(input.normal).normalized(),
                     uv: input.uv,
                     color: triangle.color,
                 };
@@ -244,49 +245,50 @@ impl SoftwareRenderer {
         let to_camera = (self.camera_position - position).normalized();
         let diffuse = normal.dot(to_sun).max(0.0);
         let half_vector = (to_sun + to_camera).normalized();
-        let shininess = if matches!(shader, ShaderKind::Metal) {
-            48.0
-        } else {
-            10.0
+        let shininess = match shader {
+            ShaderKind::Metal => 48.0,
+            ShaderKind::Ice => 24.0,
+            _ => 10.0,
         };
         let specular = normal.dot(half_vector).max(0.0).powf(shininess);
-        if matches!(shader, ShaderKind::Planet) {
-            let terrain = procedural_noise(normal * 4.5);
-            let ice = normal.y.abs().powf(9.0);
-            let ocean = Color3::new(0.025, 0.16, 0.34);
-            let mut surface = if terrain > 0.53 {
-                Color3::new(0.12, 0.48, 0.25)
-            } else {
-                ocean
-            };
-            if terrain > 0.68 {
-                surface = Color3::new(0.55, 0.43, 0.20);
-            }
-            surface = surface * (1.0 - ice) + Color3::new(0.82, 0.93, 1.0) * ice;
-            let grid = if (uv.x * 80.0).sin() * (uv.y * 40.0).sin() > 0.92 {
-                0.08
-            } else {
-                0.0
-            };
-            return surface * (0.12 + 0.88 * diffuse + grid)
-                + Color3::new(0.8, 0.9, 1.0) * specular * 0.18;
+        let rim = (1.0 - normal.dot(to_camera).max(0.0)).powf(2.2);
+        if matches!(shader, ShaderKind::Lit) {
+            // Oasis conserva una iluminación propia suave en el lado nocturno.
+            // El borde turquesa ayuda a leer la silueta sin hacerlo parecer un sol.
+            return base * (0.42 + 0.55 * diffuse)
+                + base * rim * 0.12
+                + Color3::new(0.32, 0.66, 0.78) * rim * 0.08
+                + Color3::new(1.0, 0.92, 0.76) * specular * 0.18;
+        }
+        if matches!(shader, ShaderKind::Ice) {
+            // La nieve y el hielo mantienen una luz ambiental fría para que el
+            // segundo planeta siga siendo legible en el lado nocturno.
+            return base * (0.48 + 0.48 * diffuse)
+                + base * rim * 0.15
+                + Color3::new(0.28, 0.72, 0.92) * rim * 0.16
+                + Color3::new(0.82, 0.96, 1.0) * specular * 0.32;
         }
         let brushing = 0.92 + 0.08 * (position.x * 75.0 + position.z * 11.0).sin();
-        let mut result = base * (0.16 + 0.84 * diffuse) * brushing
-            + Color3::new(1.0, 0.92, 0.72) * specular * 0.7;
+        let front_fill = normal.dot(to_camera).max(0.0);
+        // La carrocería recibe una contribución ambiental propia y una luz de
+        // contorno fría, además de la iluminación directa y los propulsores.
+        let mut result = base * (0.40 + 0.50 * diffuse + 0.10 * front_fill) * brushing
+            + base * rim * 0.11
+            + Color3::new(0.10, 0.24, 0.42) * rim * 0.18
+            + Color3::new(1.0, 0.94, 0.78) * specular * 0.72;
 
         // Las llamas funcionan también como luces puntuales azules sobre la
         // parte baja de la carrocería y las ruedas.
         for light in &self.thruster_lights {
             let to_light = *light - position;
             let distance = to_light.length();
-            if distance >= 3.0 || distance <= 1.0e-5 {
+            if distance >= 4.0 || distance <= 1.0e-5 {
                 continue;
             }
             let facing = normal.dot(to_light / distance).max(0.0);
-            let attenuation = (1.0 - distance / 3.0).powi(2);
-            let intensity = attenuation * (0.24 + facing * 1.35);
-            result = result + Color3::new(0.04, 0.48, 1.0) * intensity;
+            let attenuation = (1.0 - distance / 4.0).powi(2);
+            let intensity = attenuation * (0.32 + facing * 1.55);
+            result = result + Color3::new(0.06, 0.52, 1.0) * intensity;
         }
         result
     }
@@ -338,5 +340,42 @@ mod tests {
         );
         assert!(renderer.stats().rasterized_triangles > 0);
         assert!(renderer.stats().shaded_pixels > 0);
+    }
+
+    #[test]
+    fn planets_and_ship_remain_visible_without_direct_sunlight() {
+        let renderer = SoftwareRenderer::new(16, 16);
+        let position = Vec3::new(5.0, 0.0, 0.0);
+        let normal = Vec3::new(1.0, 0.0, 0.0);
+        let base = Color3::new(0.4, 0.4, 0.4);
+
+        let oasis = renderer.shade(
+            ShaderKind::Lit,
+            position,
+            normal,
+            Vec2::default(),
+            base,
+            0.0,
+        );
+        let ship = renderer.shade(
+            ShaderKind::Metal,
+            position,
+            normal,
+            Vec2::default(),
+            base,
+            0.0,
+        );
+        let ice = renderer.shade(
+            ShaderKind::Ice,
+            position,
+            normal,
+            Vec2::default(),
+            base,
+            0.0,
+        );
+
+        assert!(oasis.r > 0.16 && oasis.g > 0.16 && oasis.b > 0.16);
+        assert!(ice.r > 0.18 && ice.g > 0.18 && ice.b > 0.18);
+        assert!(ship.r > 0.19 && ship.g > 0.19 && ship.b > 0.19);
     }
 }

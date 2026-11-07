@@ -3,8 +3,8 @@ mod math3d;
 mod model;
 mod renderer;
 
-use assets::{DELOREAN_OBJ, locate};
-use math3d::{Mat4, Vec3};
+use assets::{DELOREAN_OBJ, HIELO_OBJ, OASIS_OBJ, locate};
+use math3d::{Mat4, PI, Vec3};
 use model::{Color3, load_obj, make_thruster_flame, make_thruster_nozzle, make_uv_sphere};
 use raylib::prelude::*;
 use renderer::{Camera, ShaderKind, SoftwareRenderer};
@@ -12,6 +12,7 @@ use std::error::Error;
 
 const RENDER_WIDTH: usize = 960;
 const RENDER_HEIGHT: usize = 540;
+const WORLD_UP: Vec3 = Vec3::new(0.0, 1.0, 0.0);
 const THRUSTER_OFFSETS: [Vec3; 4] = [
     Vec3::new(1.43, 0.69, 0.99),
     Vec3::new(1.43, 0.69, -0.99),
@@ -25,6 +26,16 @@ struct Ship {
     pitch: f32,
     roll: f32,
     speed: f32,
+}
+
+#[derive(Clone, Copy, Default)]
+struct FlightInput {
+    yaw: f32,
+    pitch: f32,
+    roll: f32,
+    throttle: f32,
+    boost: bool,
+    brake: bool,
 }
 
 impl Default for Ship {
@@ -49,36 +60,71 @@ fn ship_forward(ship: &Ship) -> Vec3 {
         .normalized()
 }
 
-fn update_ship(rl: &RaylibHandle, ship: &mut Ship, dt: f32) {
+fn flight_input(rl: &RaylibHandle) -> FlightInput {
     let key = |positive, negative| {
         (rl.is_key_down(positive) as u8 as f32) - (rl.is_key_down(negative) as u8 as f32)
     };
-    let yaw_input = key(KeyboardKey::KEY_D, KeyboardKey::KEY_A);
-    let pitch_input = key(KeyboardKey::KEY_UP, KeyboardKey::KEY_DOWN);
-    let roll_input = key(KeyboardKey::KEY_E, KeyboardKey::KEY_Q);
-    let throttle_input = key(KeyboardKey::KEY_W, KeyboardKey::KEY_S);
-    ship.yaw += yaw_input * 1.25 * dt;
-    ship.pitch = (ship.pitch + pitch_input * 1.05 * dt).clamp(-1.25, 1.25);
-    ship.roll += roll_input * 1.5 * dt;
-    let maximum_speed = if rl.is_key_down(KeyboardKey::KEY_LEFT_SHIFT) {
-        18.0
-    } else {
-        9.0
-    };
-    ship.speed += throttle_input * 7.0 * dt;
-    if throttle_input == 0.0 {
-        ship.speed *= (-0.45 * dt).exp();
+    FlightInput {
+        yaw: key(KeyboardKey::KEY_D, KeyboardKey::KEY_A),
+        pitch: key(KeyboardKey::KEY_UP, KeyboardKey::KEY_DOWN),
+        roll: key(KeyboardKey::KEY_E, KeyboardKey::KEY_Q),
+        throttle: key(KeyboardKey::KEY_W, KeyboardKey::KEY_S),
+        boost: rl.is_key_down(KeyboardKey::KEY_LEFT_SHIFT),
+        brake: rl.is_key_down(KeyboardKey::KEY_SPACE),
     }
-    ship.speed = ship.speed.clamp(-3.0, maximum_speed);
+}
+
+fn approach(current: f32, target: f32, maximum_change: f32) -> f32 {
+    current + (target - current).clamp(-maximum_change, maximum_change)
+}
+
+fn update_ship(ship: &mut Ship, input: FlightInput, dt: f32) {
+    ship.yaw += input.yaw * 1.65 * dt;
+    ship.pitch = (ship.pitch + input.pitch * 1.30 * dt).clamp(-1.18, 1.18);
+
+    // El alabeo vuelve suavemente al centro y A/D inclina un poco la nave. La
+    // cámara permanece estable, así que girar no rota toda la pantalla.
+    let target_roll = if input.roll.abs() > 0.01 {
+        input.roll * 0.82
+    } else {
+        -input.yaw * 0.28
+    };
+    let roll_response = 1.0 - (-5.5 * dt).exp();
+    ship.roll += (target_roll - ship.roll) * roll_response;
+
+    let maximum_speed = if input.boost { 24.0 } else { 12.0 };
+    if input.brake {
+        ship.speed = approach(ship.speed, 0.0, 24.0 * dt);
+    } else if input.throttle.abs() > 0.01 {
+        ship.speed += input.throttle * 13.0 * dt;
+    } else {
+        ship.speed = approach(ship.speed, 0.0, 1.35 * dt);
+    }
+    ship.speed = ship.speed.clamp(-5.0, maximum_speed);
     ship.position += ship_forward(ship) * ship.speed * dt;
+}
+
+fn simulate_ship(ship: &mut Ship, input: FlightInput, frame_dt: f32) {
+    // Se subdividen los cuadros lentos para que el control conserve la misma
+    // respuesta aun cuando el rasterizador por CPU tenga mucho trabajo.
+    let frame_dt = frame_dt.clamp(0.0, 0.20);
+    let steps = (frame_dt / (1.0 / 60.0)).ceil().clamp(1.0, 12.0) as usize;
+    let step_dt = frame_dt / steps as f32;
+    for _ in 0..steps {
+        update_ship(ship, input, step_dt);
+    }
 }
 
 fn keep_outside_sphere(ship: &mut Ship, center: Vec3, radius: f32) {
     let offset = ship.position - center;
     let distance = offset.length();
     if distance < radius && distance > 0.0001 {
-        ship.position = center + offset / distance * radius;
-        ship.speed = ship.speed.min(0.0);
+        let outward = offset / distance;
+        ship.position = center + outward * radius;
+        let velocity = ship_forward(ship) * ship.speed;
+        if velocity.dot(outward) < 0.0 {
+            ship.speed = 0.0;
+        }
     }
 }
 
@@ -95,6 +141,8 @@ fn main() -> Result<(), Box<dyn Error>> {
     framebuffer_texture.set_texture_filter(&thread, TextureFilter::TEXTURE_FILTER_BILINEAR);
 
     let ship_mesh = load_obj(locate(DELOREAN_OBJ))?;
+    let oasis_mesh = load_obj(locate(OASIS_OBJ))?;
+    let ice_mesh = load_obj(locate(HIELO_OBJ))?;
     let sphere = make_uv_sphere(28, 18);
     let thruster_nozzle = make_thruster_nozzle(16);
     let thruster_flame = make_thruster_flame(16);
@@ -103,29 +151,33 @@ fn main() -> Result<(), Box<dyn Error>> {
     let mut smooth_camera = ship.position - ship_forward(&ship) * 9.0 + Vec3::new(0.0, 3.0, 0.0);
 
     while !rl.window_should_close() {
-        let dt = rl.get_frame_time().min(0.05);
+        let dt = rl.get_frame_time();
         let time = rl.get_time() as f32;
         if rl.is_key_pressed(KeyboardKey::KEY_R) {
             ship = Ship::default();
+            smooth_camera = ship.position - ship_forward(&ship) * 9.0 + WORLD_UP * 3.0;
         }
-        update_ship(&rl, &mut ship, dt);
+        simulate_ship(&mut ship, flight_input(&rl), dt);
 
-        let planet_position =
-            Vec3::new((time * 0.13).cos() * 18.0, 0.0, (time * 0.13).sin() * 18.0);
+        let oasis_position = Vec3::new((time * 0.13).cos() * 18.0, 0.0, (time * 0.13).sin() * 18.0);
+        let ice_angle = time * 0.085 + PI * 0.72;
+        let ice_position = Vec3::new(
+            ice_angle.cos() * 29.0,
+            (ice_angle * 0.65).sin() * 3.5,
+            ice_angle.sin() * 29.0,
+        );
         keep_outside_sphere(&mut ship, Vec3::ZERO, 4.2);
-        keep_outside_sphere(&mut ship, planet_position, 4.7);
+        keep_outside_sphere(&mut ship, oasis_position, 4.8);
+        keep_outside_sphere(&mut ship, ice_position, 4.9);
 
         let rotation = ship_rotation(&ship);
         let forward = ship_forward(&ship);
-        let ship_up = rotation
-            .transform_direction(Vec3::new(0.0, 1.0, 0.0))
-            .normalized();
-        let desired_camera = ship.position - forward * 9.0 + ship_up * 3.2;
-        smooth_camera = smooth_camera.lerp(desired_camera, 1.0 - (-5.0 * dt).exp());
+        let desired_camera = ship.position - forward * 9.5 + WORLD_UP * 3.4;
+        smooth_camera = smooth_camera.lerp(desired_camera, 1.0 - (-6.5 * dt.min(0.20)).exp());
         let camera = Camera {
             position: smooth_camera,
             target: ship.position + forward * 5.0,
-            up: ship_up,
+            up: WORLD_UP,
             fov_y: 60.0_f32.to_radians(),
             near: 0.1,
             far: 250.0,
@@ -135,10 +187,15 @@ fn main() -> Result<(), Box<dyn Error>> {
         renderer.begin(&camera);
         let sun_model = Mat4::rotation_y(time * 0.18) * Mat4::scale(Vec3::new(3.5, 3.5, 3.5));
         renderer.draw_mesh(&sphere, sun_model, ShaderKind::Sun, time);
-        let planet_model = Mat4::translation(planet_position)
-            * Mat4::rotation_y(time * 0.38)
-            * Mat4::scale(Vec3::new(4.0, 4.0, 4.0));
-        renderer.draw_mesh(&sphere, planet_model, ShaderKind::Planet, time);
+        let oasis_model = Mat4::translation(oasis_position)
+            * Mat4::rotation_y(time * 0.22)
+            * Mat4::scale(Vec3::new(0.8, 0.8, 0.8));
+        renderer.draw_mesh(&oasis_mesh, oasis_model, ShaderKind::Lit, time);
+        let ice_model = Mat4::translation(ice_position)
+            * Mat4::rotation_y(-time * 0.16)
+            * Mat4::rotation_x(0.16)
+            * Mat4::scale(Vec3::new(0.86, 0.86, 0.86));
+        renderer.draw_mesh(&ice_mesh, ice_model, ShaderKind::Ice, time);
         let ship_model = Mat4::translation(ship.position)
             * rotation
             * Mat4::translation(Vec3::new(0.0, -1.15, 0.0))
@@ -190,15 +247,85 @@ fn main() -> Result<(), Box<dyn Error>> {
         );
         d.draw_rectangle(12, 12, 580, 80, Color::new(0, 0, 0, 190));
         d.draw_text(
-            "W/S velocidad  A/D giro  Flechas inclinacion  Q/E alabeo",
+            "W/S acelerar  A/D girar  Flechas inclinar  Q/E alabeo",
             24,
             22,
             18,
             Color::RAYWHITE,
         );
-        d.draw_text("Shift impulso  R reiniciar", 24, 46, 18, Color::SKYBLUE);
+        d.draw_text(
+            "Espacio frenar  Shift impulso  R reiniciar",
+            24,
+            46,
+            18,
+            Color::SKYBLUE,
+        );
         d.draw_text(&debug_text, 24, 68, 16, Color::LIGHTGRAY);
         d.draw_fps(window_width - 92, 14);
     }
     Ok(())
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn controls_keep_their_response_during_a_slow_frame() {
+        let mut ship = Ship::default();
+        let initial_position = ship.position;
+        simulate_ship(
+            &mut ship,
+            FlightInput {
+                throttle: 1.0,
+                ..FlightInput::default()
+            },
+            0.20,
+        );
+
+        assert!(
+            ship.speed > 2.5,
+            "la aceleración no debe perder tiempo de cuadro"
+        );
+        assert!((ship.position - initial_position).length() > 0.0);
+    }
+
+    #[test]
+    fn brake_stops_the_ship_without_reversing_it() {
+        let mut ship = Ship {
+            speed: 4.0,
+            ..Ship::default()
+        };
+        simulate_ship(
+            &mut ship,
+            FlightInput {
+                brake: true,
+                ..FlightInput::default()
+            },
+            0.2,
+        );
+
+        assert!(ship.speed.abs() < 1.0e-5);
+    }
+
+    #[test]
+    fn collision_only_stops_motion_toward_a_planet() {
+        let mut inward = Ship {
+            position: Vec3::new(3.0, 0.0, 0.0),
+            yaw: 0.0,
+            pitch: 0.0,
+            roll: 0.0,
+            speed: -4.0,
+        };
+        keep_outside_sphere(&mut inward, Vec3::ZERO, 4.0);
+        assert!(inward.speed.abs() < 1.0e-5);
+
+        let mut outward = Ship {
+            position: Vec3::new(3.0, 0.0, 0.0),
+            speed: 4.0,
+            ..inward
+        };
+        keep_outside_sphere(&mut outward, Vec3::ZERO, 4.0);
+        assert_eq!(outward.speed, 4.0);
+    }
 }
