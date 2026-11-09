@@ -1,331 +1,416 @@
-mod assets;
-mod math3d;
-mod model;
-mod renderer;
+//! Punto de entrada de Space Travel.
+//!
+//! * `cargo run --release` — juego con ventana (raylib solo muestra el
+//!   framebuffer generado por el renderizador por software).
+//! * `cargo run --release -- --captura <escena> <archivo.ppm> [ancho alto]`
+//!   — renderiza una escena sin ventana (evidencia y pruebas visuales).
+//! * `cargo run --release -- --benchmark` — mide tiempos por cuadro reales.
 
-use assets::{DELOREAN_OBJ, HIELO_OBJ, OASIS_OBJ, locate};
-use math3d::{Mat4, PI, Vec3};
-use model::{Color3, load_obj, make_thruster_flame, make_thruster_nozzle, make_uv_sphere};
 use raylib::prelude::*;
-use renderer::{Camera, ShaderKind, SoftwareRenderer};
+use space_travel::assets::Assets;
+use space_travel::camera::{CameraInput, CameraMode};
+use space_travel::game::{DEFAULT_SEED, Game, GameInput};
+use space_travel::minigames::RunState;
+use space_travel::renderer::{SoftwareRenderer, save_ppm};
+use space_travel::ship::FlightInput;
+use space_travel::solar::{PlanetId, config, planet_position};
+use space_travel::ui;
 use std::error::Error;
+use std::path::Path;
+use std::time::Instant;
 
 const RENDER_WIDTH: usize = 960;
 const RENDER_HEIGHT: usize = 540;
-const WORLD_UP: Vec3 = Vec3::new(0.0, 1.0, 0.0);
-const THRUSTER_OFFSETS: [Vec3; 4] = [
-    Vec3::new(1.43, 0.69, 0.99),
-    Vec3::new(1.43, 0.69, -0.99),
-    Vec3::new(-1.43, 0.69, 0.99),
-    Vec3::new(-1.43, 0.69, -0.99),
-];
 
-struct Ship {
-    position: Vec3,
-    yaw: f32,
-    pitch: f32,
-    roll: f32,
-    speed: f32,
+fn seed_from_env() -> u32 {
+    std::env::var("SPACE_TRAVEL_SEED")
+        .ok()
+        .and_then(|s| s.parse().ok())
+        .unwrap_or(DEFAULT_SEED)
 }
 
-#[derive(Clone, Copy, Default)]
-struct FlightInput {
-    yaw: f32,
-    pitch: f32,
-    roll: f32,
-    throttle: f32,
-    boost: bool,
-    brake: bool,
+fn render_size_from_env() -> (usize, usize) {
+    std::env::var("SPACE_TRAVEL_RES")
+        .ok()
+        .and_then(|s| {
+            let (w, h) = s.split_once('x')?;
+            Some((w.parse().ok()?, h.parse().ok()?))
+        })
+        .unwrap_or((RENDER_WIDTH, RENDER_HEIGHT))
 }
 
-impl Default for Ship {
-    fn default() -> Self {
-        Self {
-            position: Vec3::new(28.0, 5.0, 14.0),
-            yaw: -2.68,
-            pitch: -0.08,
-            roll: 0.0,
-            speed: 0.0,
-        }
-    }
-}
-
-fn ship_rotation(ship: &Ship) -> Mat4 {
-    Mat4::rotation_y(-ship.yaw) * Mat4::rotation_z(ship.pitch) * Mat4::rotation_x(ship.roll)
-}
-
-fn ship_forward(ship: &Ship) -> Vec3 {
-    ship_rotation(ship)
-        .transform_direction(Vec3::new(1.0, 0.0, 0.0))
-        .normalized()
-}
-
-fn flight_input(rl: &RaylibHandle) -> FlightInput {
-    let key = |positive, negative| {
-        (rl.is_key_down(positive) as u8 as f32) - (rl.is_key_down(negative) as u8 as f32)
+fn read_input(rl: &RaylibHandle) -> GameInput {
+    use KeyboardKey::*;
+    let down = |k| rl.is_key_down(k);
+    let pressed = |k| rl.is_key_pressed(k);
+    let axis = |p, n| (down(p) as u8 as f32) - (down(n) as u8 as f32);
+    let mut camera = CameraInput {
+        orbit_yaw: axis(KEY_L, KEY_J) * 0.03,
+        orbit_pitch: axis(KEY_I, KEY_K) * 0.03,
+        zoom: rl.get_mouse_wheel_move()
+            + axis(KEY_EQUAL, KEY_MINUS) * 0.3
+            + axis(KEY_KP_ADD, KEY_KP_SUBTRACT) * 0.3,
     };
-    FlightInput {
-        yaw: key(KeyboardKey::KEY_D, KeyboardKey::KEY_A),
-        pitch: key(KeyboardKey::KEY_UP, KeyboardKey::KEY_DOWN),
-        roll: key(KeyboardKey::KEY_E, KeyboardKey::KEY_Q),
-        throttle: key(KeyboardKey::KEY_W, KeyboardKey::KEY_S),
-        boost: rl.is_key_down(KeyboardKey::KEY_LEFT_SHIFT),
-        brake: rl.is_key_down(KeyboardKey::KEY_SPACE),
+    if rl.is_mouse_button_down(MouseButton::MOUSE_BUTTON_LEFT)
+        || rl.is_mouse_button_down(MouseButton::MOUSE_BUTTON_RIGHT)
+    {
+        let delta = rl.get_mouse_delta();
+        camera.orbit_yaw += delta.x * 0.006;
+        camera.orbit_pitch += delta.y * 0.006;
+    }
+    let warp_keys = [KEY_ONE, KEY_TWO, KEY_THREE, KEY_FOUR, KEY_FIVE, KEY_SIX];
+    GameInput {
+        flight: FlightInput {
+            yaw: axis(KEY_D, KEY_A),
+            pitch: axis(KEY_UP, KEY_DOWN),
+            roll: axis(KEY_E, KEY_Q),
+            throttle: axis(KEY_W, KEY_S),
+            strafe: axis(KEY_RIGHT, KEY_LEFT),
+            lift: axis(KEY_R, KEY_F),
+            boost: down(KEY_LEFT_SHIFT) || down(KEY_RIGHT_SHIFT),
+            brake: down(KEY_SPACE),
+        },
+        camera,
+        up: pressed(KEY_UP) || pressed(KEY_W),
+        down: pressed(KEY_DOWN) || pressed(KEY_S),
+        confirm: pressed(KEY_ENTER) || pressed(KEY_KP_ENTER),
+        back: pressed(KEY_ESCAPE),
+        pause: pressed(KEY_P),
+        cycle_camera: pressed(KEY_C),
+        restart: pressed(KEY_R),
+        minigame: pressed(KEY_M),
+        next_target: pressed(KEY_T),
+        toggle_orbits: pressed(KEY_O),
+        toggle_help: pressed(KEY_H),
+        toggle_stats: pressed(KEY_F3),
+        skip: pressed(KEY_SPACE),
+        reset_ship: pressed(KEY_BACKSPACE),
+        warp: warp_keys.iter().position(|k| pressed(*k)),
     }
 }
 
-fn approach(current: f32, target: f32, maximum_change: f32) -> f32 {
-    current + (target - current).clamp(-maximum_change, maximum_change)
-}
-
-fn update_ship(ship: &mut Ship, input: FlightInput, dt: f32) {
-    ship.yaw += input.yaw * 1.65 * dt;
-    ship.pitch = (ship.pitch + input.pitch * 1.30 * dt).clamp(-1.18, 1.18);
-
-    // El alabeo vuelve suavemente al centro y A/D inclina un poco la nave. La
-    // cámara permanece estable, así que girar no rota toda la pantalla.
-    let target_roll = if input.roll.abs() > 0.01 {
-        input.roll * 0.82
-    } else {
-        -input.yaw * 0.28
-    };
-    let roll_response = 1.0 - (-5.5 * dt).exp();
-    ship.roll += (target_roll - ship.roll) * roll_response;
-
-    let maximum_speed = if input.boost { 24.0 } else { 12.0 };
-    if input.brake {
-        ship.speed = approach(ship.speed, 0.0, 24.0 * dt);
-    } else if input.throttle.abs() > 0.01 {
-        ship.speed += input.throttle * 13.0 * dt;
-    } else {
-        ship.speed = approach(ship.speed, 0.0, 1.35 * dt);
-    }
-    ship.speed = ship.speed.clamp(-5.0, maximum_speed);
-    ship.position += ship_forward(ship) * ship.speed * dt;
-}
-
-fn simulate_ship(ship: &mut Ship, input: FlightInput, frame_dt: f32) {
-    // Se subdividen los cuadros lentos para que el control conserve la misma
-    // respuesta aun cuando el rasterizador por CPU tenga mucho trabajo.
-    let frame_dt = frame_dt.clamp(0.0, 0.20);
-    let steps = (frame_dt / (1.0 / 60.0)).ceil().clamp(1.0, 12.0) as usize;
-    let step_dt = frame_dt / steps as f32;
-    for _ in 0..steps {
-        update_ship(ship, input, step_dt);
-    }
-}
-
-fn keep_outside_sphere(ship: &mut Ship, center: Vec3, radius: f32) {
-    let offset = ship.position - center;
-    let distance = offset.length();
-    if distance < radius && distance > 0.0001 {
-        let outward = offset / distance;
-        ship.position = center + outward * radius;
-        let velocity = ship_forward(ship) * ship.speed;
-        if velocity.dot(outward) < 0.0 {
-            ship.speed = 0.0;
-        }
-    }
-}
-
-fn main() -> Result<(), Box<dyn Error>> {
+fn run_window() -> Result<(), Box<dyn Error>> {
+    let (render_width, render_height) = render_size_from_env();
     let (mut rl, thread) = raylib::init()
         .size(1280, 720)
         .title("Space Travel - Software Renderer en Rust")
         .resizable()
+        .msaa_4x()
         .build();
     rl.set_target_fps(60);
+    rl.set_exit_key(None);
 
-    let image = Image::gen_image_color(RENDER_WIDTH as i32, RENDER_HEIGHT as i32, Color::BLACK);
-    let mut framebuffer_texture = rl.load_texture_from_image(&thread, &image)?;
-    framebuffer_texture.set_texture_filter(&thread, TextureFilter::TEXTURE_FILTER_BILINEAR);
+    let image = Image::gen_image_color(render_width as i32, render_height as i32, Color::BLACK);
+    let mut framebuffer = rl.load_texture_from_image(&thread, &image)?;
+    framebuffer.set_texture_filter(&thread, TextureFilter::TEXTURE_FILTER_BILINEAR);
 
-    let ship_mesh = load_obj(locate(DELOREAN_OBJ))?;
-    let oasis_mesh = load_obj(locate(OASIS_OBJ))?;
-    let ice_mesh = load_obj(locate(HIELO_OBJ))?;
-    let sphere = make_uv_sphere(28, 18);
-    let thruster_nozzle = make_thruster_nozzle(16);
-    let thruster_flame = make_thruster_flame(16);
-    let mut renderer = SoftwareRenderer::new(RENDER_WIDTH, RENDER_HEIGHT);
-    let mut ship = Ship::default();
-    let mut smooth_camera = ship.position - ship_forward(&ship) * 9.0 + Vec3::new(0.0, 3.0, 0.0);
+    let assets = Assets::load()?;
+    let mut game = Game::new(assets, seed_from_env());
+    let mut renderer = SoftwareRenderer::new(render_width, render_height);
 
-    while !rl.window_should_close() {
+    // Captura automática para documentación: SPACE_TRAVEL_AUTOSHOT=cuadros:ruta.png
+    let autoshot = std::env::var("SPACE_TRAVEL_AUTOSHOT").ok().and_then(|v| {
+        let (frames, path) = v.split_once(':')?;
+        Some((frames.parse::<u32>().ok()?, path.to_owned()))
+    });
+    let autoscene = std::env::var("SPACE_TRAVEL_ESCENA").ok();
+    if let Some(scene) = &autoscene {
+        setup_scene(&mut game, scene);
+    }
+    let mut frame_count = 0u32;
+
+    while !rl.window_should_close() && !game.quit {
+        let frame_start = Instant::now();
         let dt = rl.get_frame_time();
-        let time = rl.get_time() as f32;
-        if rl.is_key_pressed(KeyboardKey::KEY_R) {
-            ship = Ship::default();
-            smooth_camera = ship.position - ship_forward(&ship) * 9.0 + WORLD_UP * 3.0;
-        }
-        simulate_ship(&mut ship, flight_input(&rl), dt);
-
-        let oasis_position = Vec3::new((time * 0.13).cos() * 18.0, 0.0, (time * 0.13).sin() * 18.0);
-        let ice_angle = time * 0.085 + PI * 0.72;
-        let ice_position = Vec3::new(
-            ice_angle.cos() * 29.0,
-            (ice_angle * 0.65).sin() * 3.5,
-            ice_angle.sin() * 29.0,
-        );
-        keep_outside_sphere(&mut ship, Vec3::ZERO, 4.2);
-        keep_outside_sphere(&mut ship, oasis_position, 4.8);
-        keep_outside_sphere(&mut ship, ice_position, 4.9);
-
-        let rotation = ship_rotation(&ship);
-        let forward = ship_forward(&ship);
-        let desired_camera = ship.position - forward * 9.5 + WORLD_UP * 3.4;
-        smooth_camera = smooth_camera.lerp(desired_camera, 1.0 - (-6.5 * dt.min(0.20)).exp());
-        let camera = Camera {
-            position: smooth_camera,
-            target: ship.position + forward * 5.0,
-            up: WORLD_UP,
-            fov_y: 60.0_f32.to_radians(),
-            near: 0.1,
-            far: 250.0,
+        let input = if autoscene.is_some() {
+            GameInput::default()
+        } else {
+            read_input(&rl)
         };
+        game.update(&input, dt);
+        game.render(&mut renderer);
+        framebuffer.update_texture(renderer.pixels())?;
+        let ui_frame = game.build_ui(&renderer);
 
-        renderer.clear(Color3::new(0.003, 0.005, 0.018), time);
-        renderer.begin(&camera);
-        let sun_model = Mat4::rotation_y(time * 0.18) * Mat4::scale(Vec3::new(3.5, 3.5, 3.5));
-        renderer.draw_mesh(&sphere, sun_model, ShaderKind::Sun, time);
-        let oasis_model = Mat4::translation(oasis_position)
-            * Mat4::rotation_y(time * 0.22)
-            * Mat4::scale(Vec3::new(0.8, 0.8, 0.8));
-        renderer.draw_mesh(&oasis_mesh, oasis_model, ShaderKind::Lit, time);
-        let ice_model = Mat4::translation(ice_position)
-            * Mat4::rotation_y(-time * 0.16)
-            * Mat4::rotation_x(0.16)
-            * Mat4::scale(Vec3::new(0.86, 0.86, 0.86));
-        renderer.draw_mesh(&ice_mesh, ice_model, ShaderKind::Ice, time);
-        let ship_model = Mat4::translation(ship.position)
-            * rotation
-            * Mat4::translation(Vec3::new(0.0, -1.15, 0.0))
-            * Mat4::scale(Vec3::new(0.72, 0.72, 0.72));
-        let thruster_lights = THRUSTER_OFFSETS
-            .map(|offset| ship_model.transform_point(offset + Vec3::new(0.0, -0.28, 0.0)));
-        renderer.set_thruster_lights(&thruster_lights);
-        renderer.draw_mesh(&ship_mesh, ship_model, ShaderKind::Metal, time);
-
-        let flame_length = 0.82 + ship.speed.abs() / 18.0 * 0.7 + (time * 17.0).sin() * 0.08;
-        for offset in THRUSTER_OFFSETS {
-            let thruster_model = ship_model * Mat4::translation(offset);
-            renderer.draw_mesh(&thruster_nozzle, thruster_model, ShaderKind::Metal, time);
-            renderer.draw_mesh(
-                &thruster_flame,
-                thruster_model * Mat4::scale(Vec3::new(1.0, flame_length, 1.0)),
-                ShaderKind::Thruster,
-                time,
-            );
-        }
-
-        framebuffer_texture.update_texture(renderer.pixels())?;
-        let window_width = rl.get_screen_width();
-        let window_height = rl.get_screen_height();
-        let scale = (window_width as f32 / RENDER_WIDTH as f32)
-            .min(window_height as f32 / RENDER_HEIGHT as f32);
-        let source = Rectangle::new(0.0, 0.0, RENDER_WIDTH as f32, RENDER_HEIGHT as f32);
+        let width = rl.get_screen_width();
+        let height = rl.get_screen_height();
+        let scale = (width as f32 / render_width as f32).min(height as f32 / render_height as f32);
         let destination = Rectangle::new(
-            (window_width as f32 - RENDER_WIDTH as f32 * scale) * 0.5,
-            (window_height as f32 - RENDER_HEIGHT as f32 * scale) * 0.5,
-            RENDER_WIDTH as f32 * scale,
-            RENDER_HEIGHT as f32 * scale,
+            (width as f32 - render_width as f32 * scale) * 0.5,
+            (height as f32 - render_height as f32 * scale) * 0.5,
+            render_width as f32 * scale,
+            render_height as f32 * scale,
         );
-        let stats = renderer.stats();
-        let debug_text = format!(
-            "Velocidad {:.1} | tris {}/{} | pixeles {}",
-            ship.speed, stats.rasterized_triangles, stats.submitted_triangles, stats.shaded_pixels,
-        );
-
-        let mut d = rl.begin_drawing(&thread);
-        d.clear_background(Color::BLACK);
-        d.draw_texture_pro(
-            &framebuffer_texture,
-            source,
-            destination,
-            Vector2::zero(),
-            0.0,
-            Color::WHITE,
-        );
-        d.draw_rectangle(12, 12, 580, 80, Color::new(0, 0, 0, 190));
-        d.draw_text(
-            "W/S acelerar  A/D girar  Flechas inclinar  Q/E alabeo",
-            24,
-            22,
-            18,
-            Color::RAYWHITE,
-        );
-        d.draw_text(
-            "Espacio frenar  Shift impulso  R reiniciar",
-            24,
-            46,
-            18,
-            Color::SKYBLUE,
-        );
-        d.draw_text(&debug_text, 24, 68, 16, Color::LIGHTGRAY);
-        d.draw_fps(window_width - 92, 14);
+        let take_screenshot = rl.is_key_pressed(KeyboardKey::KEY_F12);
+        {
+            let mut d = rl.begin_drawing(&thread);
+            d.clear_background(Color::BLACK);
+            d.draw_texture_pro(
+                &framebuffer,
+                Rectangle::new(0.0, 0.0, render_width as f32, render_height as f32),
+                destination,
+                Vector2::zero(),
+                0.0,
+                Color::WHITE,
+            );
+            ui::draw(&mut d, &ui_frame, width, height);
+        }
+        frame_count += 1;
+        if take_screenshot {
+            let name = format!("captura_{frame_count}.png");
+            rl.take_screenshot(&thread, &name);
+        }
+        if let Some((frames, path)) = &autoshot
+            && frame_count == *frames
+        {
+            rl.take_screenshot(&thread, path);
+            break;
+        }
+        game.record_frame_time(frame_start.elapsed().as_secs_f32());
     }
     Ok(())
 }
 
-#[cfg(test)]
-mod tests {
-    use super::*;
+fn press(f: impl Fn(&mut GameInput)) -> GameInput {
+    let mut input = GameInput::default();
+    f(&mut input);
+    input
+}
 
-    #[test]
-    fn controls_keep_their_response_during_a_slow_frame() {
-        let mut ship = Ship::default();
-        let initial_position = ship.position;
-        simulate_ship(
-            &mut ship,
-            FlightInput {
-                throttle: 1.0,
-                ..FlightInput::default()
-            },
-            0.20,
-        );
-
-        assert!(
-            ship.speed > 2.5,
-            "la aceleración no debe perder tiempo de cuadro"
-        );
-        assert!((ship.position - initial_position).length() > 0.0);
+fn advance(game: &mut Game, seconds: f32, input: &GameInput) {
+    let steps = (seconds / 0.05).ceil() as usize;
+    for _ in 0..steps {
+        game.update(input, 0.05);
     }
+}
 
-    #[test]
-    fn brake_stops_the_ship_without_reversing_it() {
-        let mut ship = Ship {
-            speed: 4.0,
-            ..Ship::default()
-        };
-        simulate_ship(
-            &mut ship,
-            FlightInput {
-                brake: true,
-                ..FlightInput::default()
-            },
-            0.2,
-        );
+fn planet_by_name(name: &str) -> Option<(usize, PlanetId)> {
+    PlanetId::ALL
+        .iter()
+        .enumerate()
+        .find(|(_, id)| config(**id).name.to_lowercase() == name)
+        .map(|(i, id)| (i, *id))
+}
 
-        assert!(ship.speed.abs() < 1.0e-5);
+/// Prepara una escena reproducible para capturas y pruebas visuales.
+fn setup_scene(game: &mut Game, scene: &str) {
+    let launch_at = |game: &mut Game, t: f32| {
+        game.start_new_game();
+        advance(game, t, &GameInput::default());
+    };
+    let fly = |game: &mut Game| {
+        game.start_new_game();
+        game.update(&press(|i| i.skip = true), 0.016);
+    };
+    match scene {
+        "menu" => advance(game, 3.0, &GameInput::default()),
+        "cuenta" => launch_at(game, 2.2),
+        "encendido" => launch_at(game, 4.4),
+        "despegue" => launch_at(game, 7.0),
+        "ascenso" => launch_at(game, 9.6),
+        "separacion" => launch_at(game, 14.0),
+        "despliegue" => launch_at(game, 16.4),
+        "vuelo" => {
+            fly(game);
+            advance(game, 2.0, &press(|i| i.flight.throttle = 1.0));
+        }
+        "sistema" => {
+            fly(game);
+            game.ship.position = space_travel::math3d::Vec3::new(120.0, 330.0, 560.0);
+            let to_sun = (-game.ship.position).normalized();
+            game.ship
+                .face_towards(to_sun, space_travel::math3d::Vec3::new(0.0, 1.0, 0.0));
+            game.rig.snap(&game.ship);
+            game.rig.third_distance = 9.0;
+            advance(game, 1.0, &GameInput::default());
+        }
+        "primera_persona" | "orbital" => {
+            fly(game);
+            game.update(&press(|i| i.warp = Some(0)), 0.016);
+            advance(game, 4.0, &GameInput::default());
+            let mode = if scene == "orbital" {
+                CameraMode::Orbital
+            } else {
+                CameraMode::FirstPerson
+            };
+            game.rig.set_mode(mode);
+            advance(game, 1.5, &GameInput::default());
+        }
+        "meteoritos" => {
+            fly(game);
+            game.meteors.cycle_time =
+                space_travel::meteors::SHOWER_CYCLE - space_travel::meteors::SHOWER_DURATION + 0.5;
+            advance(game, 6.0, &GameInput::default());
+            game.ship.hull = 100.0;
+        }
+        other => {
+            let (base, kind) = other.split_once('_').map_or((other, ""), |(a, b)| (a, b));
+            let (planet_name, kind) = if base == "superficie" || base == "minijuego" {
+                (kind, base)
+            } else {
+                (base, kind)
+            };
+            let Some((index, id)) = planet_by_name(planet_name) else {
+                eprintln!("Escena desconocida: {scene}");
+                return;
+            };
+            fly(game);
+            game.update(&press(|i| i.warp = Some(index)), 0.016);
+            advance(game, 4.6, &GameInput::default());
+            match kind {
+                "superficie" => {
+                    // Vuelo rasante: la nave cerca del suelo mirando al horizonte.
+                    let center = planet_position(id, game.sim_time);
+                    let up = (game.ship.position - center).normalized();
+                    let radius = game.planet_radius_world(id);
+                    game.ship.position = center + up * (radius + 5.0);
+                    let tangent = up.any_perpendicular();
+                    game.ship
+                        .face_towards((tangent - up * 0.25).normalized(), up);
+                    game.rig.snap(&game.ship);
+                    advance(game, 0.6, &GameInput::default());
+                }
+                "minijuego" => {
+                    game.update(&press(|i| i.minigame = true), 0.016);
+                    game.update(&press(|i| i.confirm = true), 0.016);
+                    if let Some(runner) = &game.minigame {
+                        assert_eq!(runner.state, RunState::Playing);
+                    }
+                    // Acercarse al objetivo para que aparezca en cuadro.
+                    let target = game.minigame.as_ref().and_then(|runner| {
+                        let ctx = space_travel::minigames::MinigameContext {
+                            planet: id,
+                            planet_model: space_travel::solar::planet_model(id, game.sim_time),
+                            planet_center: planet_position(id, game.sim_time),
+                            planet_scale: config(id).scale,
+                            ship_position: game.ship.position,
+                            ship_velocity: game.ship.velocity,
+                            time: runner.elapsed,
+                            surface: &game.assets.planets[id.index()].surface,
+                        };
+                        runner.game.objective(&ctx)
+                    });
+                    if let Some(target) = target {
+                        let center = planet_position(id, game.sim_time);
+                        let up = (target - center).normalized();
+                        let back = up.any_perpendicular();
+                        game.ship.position = target + up * 9.0 + back * 16.0;
+                        game.ship
+                            .face_towards((target - game.ship.position).normalized(), up);
+                        game.rig.snap(&game.ship);
+                    }
+                    advance(game, 0.5, &GameInput::default());
+                }
+                _ => {}
+            }
+        }
     }
+}
 
-    #[test]
-    fn collision_only_stops_motion_toward_a_planet() {
-        let mut inward = Ship {
-            position: Vec3::new(3.0, 0.0, 0.0),
-            yaw: 0.0,
-            pitch: 0.0,
-            roll: 0.0,
-            speed: -4.0,
-        };
-        keep_outside_sphere(&mut inward, Vec3::ZERO, 4.0);
-        assert!(inward.speed.abs() < 1.0e-5);
+fn run_capture(
+    scene: &str,
+    path: &Path,
+    width: usize,
+    height: usize,
+) -> Result<(), Box<dyn Error>> {
+    let assets = Assets::load()?;
+    let mut game = Game::new(assets, seed_from_env());
+    setup_scene(&mut game, scene);
+    let mut renderer = SoftwareRenderer::new(width, height);
+    let start = Instant::now();
+    game.render(&mut renderer);
+    let elapsed = start.elapsed().as_secs_f32() * 1000.0;
+    save_ppm(path, width, height, renderer.pixels())?;
+    let s = renderer.stats();
+    println!(
+        "{scene}: {:?} | {elapsed:.1} ms | draws {} | tris {} -> {} | backface {} | clip {} | culled {} | lod {} | px {}",
+        game.screen,
+        s.draw_calls,
+        s.submitted_triangles,
+        s.rasterized_triangles,
+        s.backface_culled,
+        s.clipped_triangles,
+        s.culled_objects,
+        s.lod_reduced_draws,
+        s.shaded_pixels
+    );
+    // Texto del HUD para documentar lo que se vería en pantalla.
+    if std::env::var("SPACE_TRAVEL_HUD").is_ok() {
+        println!("{}", game.build_ui(&renderer).all_text());
+    }
+    Ok(())
+}
 
-        let mut outward = Ship {
-            position: Vec3::new(3.0, 0.0, 0.0),
-            speed: 4.0,
-            ..inward
-        };
-        keep_outside_sphere(&mut outward, Vec3::ZERO, 4.0);
-        assert_eq!(outward.speed, 4.0);
+fn run_benchmark() -> Result<(), Box<dyn Error>> {
+    let (width, height) = render_size_from_env();
+    let mut renderer = SoftwareRenderer::new(width, height);
+    println!(
+        "Benchmark a {width}x{height}, {} hilos disponibles",
+        std::thread::available_parallelism()
+            .map(|n| n.get())
+            .unwrap_or(1)
+    );
+    let scenes = [
+        "despegue",
+        "separacion",
+        "sistema",
+        "vuelo",
+        "tierra",
+        "hielo",
+        "oasis",
+        "fuego",
+        "dulces",
+        "escandalosos",
+        "superficie_oasis",
+        "superficie_hielo",
+        "minijuego_dulces",
+        "meteoritos",
+    ];
+    let mut total = 0.0;
+    for scene in scenes {
+        let mut game = Game::new(Assets::load()?, seed_from_env());
+        setup_scene(&mut game, scene);
+        let frames = 30;
+        let start = Instant::now();
+        let mut tris = 0;
+        for _ in 0..frames {
+            game.update(&GameInput::default(), 1.0 / 60.0);
+            game.render(&mut renderer);
+            tris += renderer.stats().rasterized_triangles;
+        }
+        let ms = start.elapsed().as_secs_f32() * 1000.0 / frames as f32;
+        total += ms;
+        println!(
+            "{scene:>18}: {ms:6.1} ms/cuadro ({:5.1} FPS)  tris rasterizados/cuadro {}",
+            1000.0 / ms,
+            tris / frames
+        );
+    }
+    println!(
+        "Promedio: {:.1} ms/cuadro ({:.1} FPS)",
+        total / scenes.len() as f32,
+        1000.0 * scenes.len() as f32 / total
+    );
+    Ok(())
+}
+
+fn main() -> Result<(), Box<dyn Error>> {
+    let args: Vec<String> = std::env::args().collect();
+    match args.get(1).map(String::as_str) {
+        Some("--captura") => {
+            let scene = args.get(2).ok_or("falta la escena")?;
+            let path = args.get(3).ok_or("falta el archivo de salida")?;
+            let width = args
+                .get(4)
+                .and_then(|v| v.parse().ok())
+                .unwrap_or(RENDER_WIDTH);
+            let height = args
+                .get(5)
+                .and_then(|v| v.parse().ok())
+                .unwrap_or(RENDER_HEIGHT);
+            run_capture(scene, Path::new(path), width, height)
+        }
+        Some("--benchmark") => run_benchmark(),
+        _ => run_window(),
     }
 }
