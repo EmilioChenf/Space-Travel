@@ -1,0 +1,12 @@
+# Space Travel - modelo Sol
+# Generado proceduralmente por Space Travel (src/procgen.rs, src/worlds.rs)
+
+newmtl Sol_Plasma
+Ns 64.000
+Ka 1.000000 1.000000 1.000000
+Kd 1.000000 0.600000 0.100000
+Ks 0.500000 0.500000 0.500000
+Ke 6.000000 3.600000 0.600000
+Ni 1.450000
+d 1.000000
+illum 2

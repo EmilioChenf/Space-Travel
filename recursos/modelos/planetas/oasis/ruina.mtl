@@ -1,0 +1,22 @@
+# Space Travel - modelo ruina
+# Generado proceduralmente por Space Travel (src/procgen.rs, src/worlds.rs)
+
+newmtl Ruina_Piedra_Arenisca
+Ns 32.000
+Ka 1.000000 1.000000 1.000000
+Kd 0.820000 0.700000 0.500000
+Ks 0.500000 0.500000 0.500000
+Ke 0.000000 0.000000 0.000000
+Ni 1.450000
+d 1.000000
+illum 2
+
+newmtl Ruina_Piedra_Oscura
+Ns 32.000
+Ka 1.000000 1.000000 1.000000
+Kd 0.550000 0.450000 0.330000
+Ks 0.500000 0.500000 0.500000
+Ke 0.000000 0.000000 0.000000
+Ni 1.450000
+d 1.000000
+illum 2

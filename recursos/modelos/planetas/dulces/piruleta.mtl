@@ -1,0 +1,32 @@
+# Space Travel - modelo piruleta
+# Generado proceduralmente por Space Travel (src/procgen.rs, src/worlds.rs)
+
+newmtl Piruleta_Caramelo_Rojo
+Ns 32.000
+Ka 1.000000 1.000000 1.000000
+Kd 0.950000 0.120000 0.200000
+Ks 0.500000 0.500000 0.500000
+Ke 0.000000 0.000000 0.000000
+Ni 1.450000
+d 1.000000
+illum 2
+
+newmtl Piruleta_Caramelo_Blanco
+Ns 32.000
+Ka 1.000000 1.000000 1.000000
+Kd 0.980000 0.980000 0.980000
+Ks 0.500000 0.500000 0.500000
+Ke 0.000000 0.000000 0.000000
+Ni 1.450000
+d 1.000000
+illum 2
+
+newmtl Piruleta_Palito_Galleta
+Ns 32.000
+Ka 1.000000 1.000000 1.000000
+Kd 0.950000 0.900000 0.800000
+Ks 0.500000 0.500000 0.500000
+Ke 0.000000 0.000000 0.000000
+Ni 1.450000
+d 1.000000
+illum 2
