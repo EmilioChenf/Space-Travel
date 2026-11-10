@@ -1357,7 +1357,7 @@ impl Game {
             }
         }
         if self.show_stats {
-            self.ui_stats(&mut ui);
+            self.ui_stats(&mut ui, renderer);
         }
         ui
     }
@@ -2038,11 +2038,17 @@ impl Game {
         }
     }
 
-    fn ui_stats(&self, ui: &mut UiFrame) {
+    fn ui_stats(&self, ui: &mut UiFrame, renderer: &SoftwareRenderer) {
         let s = self.last_stats;
-        ui.panel(390.0, 16.0, 500.0, 214.0);
+        ui.panel(390.0, 16.0, 500.0, 239.0);
         let lines = [
             format!("FPS {:.0}  |  cuadro {:.1} ms", self.fps, self.frame_ms),
+            format!(
+                "Render {}x{}  |  hilos {}",
+                renderer.width(),
+                renderer.height(),
+                renderer.thread_count()
+            ),
             format!(
                 "Vertex stage {:.1} ms  |  Raster + shading {:.1} ms",
                 s.vertex_ms, s.raster_ms

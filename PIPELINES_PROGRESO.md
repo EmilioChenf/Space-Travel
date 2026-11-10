@@ -4,9 +4,9 @@ Cada pipeline siguió el flujo análisis → implementación → integración �
 compilación → pruebas → corrección → validación. Herramientas usadas en
 cada uno: `cargo fmt --check`, `cargo clippy --release --all-targets`
 (sin advertencias), `cargo test --release` y `cargo build --release`.
-Estado final: **78 pruebas en verde**.
+Estado final: **80 pruebas en verde**.
 
-**Último pipeline completado:** P18. **Pendiente fuera del código:** grabar
+**Último pipeline completado:** P19. **Pendiente fuera del código:** grabar
 el video (P18) y completar los datos de los integrantes en el `LEEME.md`.
 
 | ID | Pipeline | Estado |
@@ -30,6 +30,7 @@ el video (P18) y completar los datos de los integrantes en el `LEEME.md`.
 | P16 | Integración y pruebas funcionales | COMPLETADO |
 | P17 | Auditoría de rúbrica | COMPLETADO |
 | P18 | Documentación y entrega | EN PROCESO (falta el video) |
+| P19 | Calidad visual, 60 FPS y escalado multinúcleo | COMPLETADO |
 
 ---
 
@@ -159,8 +160,8 @@ el video (P18) y completar los datos de los integrantes en el `LEEME.md`.
   decoraciones, decoraciones solo si el planeta ocupa más de 25 px, visibility
   buffer (un shader por píxel), vertex stage y raster multihilo, descarte de
   triángulos subpíxel.
-- **Medido:** 50,7 FPS de media en 14 escenas a 960x540 con 4 hilos
-  (mínimo 25,6 FPS).
+- **Medición inicial:** 50,7 FPS de media en 14 escenas a 960x540 con 4 hilos
+  (mínimo 25,6 FPS). La medición actual está en P19.
 
 ### P16 — Integración y pruebas funcionales
 - Pruebas de estados del juego, warp a los seis planetas, colisiones,
@@ -176,3 +177,21 @@ el video (P18) y completar los datos de los integrantes en el `LEEME.md`.
 - `LEEME.md` actualizado, guía del video en `docs/VIDEO_DEMO.md`.
 - **Pendiente:** grabar y enlazar el video, y completar los datos de los
   integrantes.
+
+### P19 — Calidad visual y escalado multinúcleo
+- Resolución dinámica automática entre 896x504 y 1280x720, con inicio en
+  1152x648 y objetivo fijo de 60 FPS; no requiere opciones del usuario.
+- Baja de nivel tras 8 cuadros pesados y solo sube después de 300 cuadros con
+  margen, evitando tirones y oscilaciones visibles. El HUD permanece a la
+  resolución completa de la ventana.
+- Detección de todos los procesadores lógicos (20 en el equipo medido),
+  bandas de 12 filas para mejorar el balance y límite de granularidad para
+  no crear hilos de vertex stage con demasiado poco trabajo.
+- Binario `release` con LTO completo, una unidad de generación de código e
+  instrucciones SIMD de la CPU local. Límite de FPS ajustado al monitor.
+- HUD con paneles y barras redondeadas, sombras y brillo; `F3` ahora muestra
+  resolución e hilos activos.
+- **Medido:** las 14 escenas superan 60 FPS (mínimo 66,9; promedio 86,9)
+  usando el mismo controlador dinámico que la ventana interactiva.
+- **Pruebas:** 80/80 pruebas pasan en `release`, incluidas dos del controlador
+  de resolución.

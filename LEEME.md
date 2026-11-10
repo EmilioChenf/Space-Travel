@@ -29,7 +29,8 @@ la escena.
   de raylib se compilan la primera vez.
 - Windows: Visual Studio Build Tools. Linux: `libx11-dev libxrandr-dev
   libxinerama-dev libxcursor-dev libxi-dev libgl1-mesa-dev`.
-- Una CPU de 4 núcleos o más se recomienda: el rasterizador es multihilo.
+- Una CPU de 4 núcleos o más se recomienda: el rasterizador detecta y usa
+  automáticamente todos los procesadores lógicos disponibles.
 
 ## Instalación y ejecución
 
@@ -57,8 +58,15 @@ cargo run --release --bin generar_modelos
 | `--captura <escena> <archivo.ppm> [ancho alto]` | Renderiza una escena sin ventana (escenas: `menu`, `cuenta`, `encendido`, `despegue`, `ascenso`, `separacion`, `despliegue`, `vuelo`, `sistema`, `primera_persona`, `orbital`, `meteoritos`, `<planeta>`, `superficie_<planeta>`, `minijuego_<planeta>`). |
 | `generar_modelos` | Regenera los OBJ/MTL procedurales en `recursos/modelos`. |
 | `SPACE_TRAVEL_SEED=<n>` | Semilla de las decoraciones y la lluvia de meteoritos (por defecto 20261109). |
-| `SPACE_TRAVEL_RES=<ancho>x<alto>` | Resolución interna del framebuffer (por defecto 960x540). |
 | `SPACE_TRAVEL_ESCENA` + `SPACE_TRAVEL_AUTOSHOT=<cuadros>:<ruta relativa.png>` | Abre la ventana en una escena y guarda una captura real (así se generaron las imágenes de `docs/capturas`). |
+
+No es necesario elegir calidad ni cantidad de hilos. El juego apunta siempre
+a **60 FPS**, usa todos los procesadores lógicos y ajusta automáticamente el
+render 3D entre 896x504 y 1280x720. Comienza en 1152x648, baja con rapidez si
+una escena no deja margen y solo sube tras varios segundos de rendimiento
+estable. El HUD se mantiene a la resolución completa de la ventana.
+
+![Calidad dinámica a 60 FPS](docs/capturas/calidad_dinamica_60fps.png)
 
 ## Controles
 
@@ -170,22 +178,23 @@ del video en [`docs/VIDEO_DEMO.md`](docs/VIDEO_DEMO.md).
 
 ## Rendimiento medido
 
-`cargo run --release -- --benchmark` en el entorno de desarrollo (Intel Xeon
-2,1 GHz, 4 hilos, 960x540):
+`cargo run --release -- --benchmark` en el entorno de desarrollo actual
+(20 procesadores lógicos, resolución dinámica con objetivo de 60 FPS):
 
 | Escena | ms/cuadro | FPS |
 |---|---|---|
-| Despegue (pantalla llena de cielo y humo) | 29,7 | 33,7 |
-| Vista del sistema solar | 13,1 | 76,3 |
-| Vuelo | 15,2 | 65,7 |
-| Planetas de cerca | 16,4 – 21,7 | 46 – 61 |
-| Vuelo rasante sobre Oasis | 25,2 | 39,6 |
-| Minijuego Carrera de caramelos | 39,1 | 25,6 |
-| **Promedio de 14 escenas** | **19,7** | **50,7** |
+| Despegue (pantalla llena de cielo y humo) | 14,9 | 66,9 |
+| Vista del sistema solar | 11,2 | 89,0 |
+| Vuelo | 11,6 | 85,9 |
+| Planetas de cerca | 10,5 – 11,7 | 85,8 – 95,4 |
+| Vuelo rasante sobre Oasis | 13,2 | 76,0 |
+| Minijuego Carrera de caramelos | 14,4 | 69,7 |
+| **Promedio de 14 escenas** | **11,5** | **86,9** |
 
-Los números dependen del equipo; en una CPU de escritorio con más núcleos
-deberían ser mejores. Pulsa `F3` en el juego para ver FPS, tiempos de las
-etapas, triángulos enviados/rasterizados/descartados y dibujos con LOD.
+Las 14 escenas permanecieron por encima de 60 FPS; las más costosas usaron
+896x504 y las escenas normales conservaron 1024x576 o 1152x648. Los números
+dependen del equipo. Pulsa `F3` para ver resolución, hilos activos, FPS,
+tiempos de las etapas, triángulos y dibujos con LOD.
 
 ## Estructura
 
@@ -221,7 +230,7 @@ docs/capturas/     capturas reales de la ventana
 cargo test --release
 ```
 
-78 pruebas automáticas: matemáticas (rotaciones, inversas, proyección,
+80 pruebas automáticas: matemáticas (rotaciones, inversas, proyección,
 normales), lector OBJ, materiales, LOD, primitivas y su orientación,
 validación de todos los OBJ/MTL del repositorio, profundidad, recorte,
 culling, interpolación, partículas, shaders distintos y animados, órbitas,
@@ -257,8 +266,8 @@ resultado.
 
 - **El video de demostración aún no está grabado**: la guía está en
   `docs/VIDEO_DEMO.md`. Es un requisito obligatorio de la entrega.
-- El rendimiento cae por debajo de 30 FPS en escenas con muchos píxeles
-  sombreados (carrera de caramelos de cerca) en una CPU de 4 hilos.
+- La resolución 3D puede bajar temporalmente en escenas pesadas para mantener
+  60 FPS; el HUD conserva siempre la resolución completa de la ventana.
 - La fuente por defecto de raylib solo tiene ASCII: el HUD omite acentos.
 - La colisión con la superficie usa una rejilla conservadora de alturas
   máximas, así que la nave flota un poco sobre árboles y edificios.

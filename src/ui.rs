@@ -75,13 +75,16 @@ pub fn draw(d: &mut RaylibDrawHandle, ui: &UiFrame, width: i32, height: i32) {
                 h,
                 color: c,
             } => {
-                d.draw_rectangle(
-                    px(*x) as i32,
-                    py(*y) as i32,
-                    (w * s) as i32,
-                    (h * s) as i32,
-                    color(*c),
+                let rect = Rectangle::new(px(*x), py(*y), w * s, h * s);
+                // Sombra y esquinas suaves: conservan el estilo arcade pero
+                // separan mejor menús y avisos de una escena luminosa.
+                d.draw_rectangle_rounded(
+                    Rectangle::new(rect.x + 3.0 * s, rect.y + 4.0 * s, rect.width, rect.height),
+                    0.16,
+                    8,
+                    Color::new(0, 0, 0, c[3] / 3),
                 );
+                d.draw_rectangle_rounded(rect, 0.16, 8, color(*c));
             }
             UiElement::Frame {
                 x,
@@ -90,9 +93,11 @@ pub fn draw(d: &mut RaylibDrawHandle, ui: &UiFrame, width: i32, height: i32) {
                 h,
                 color: c,
             } => {
-                d.draw_rectangle_lines_ex(
+                d.draw_rectangle_rounded_lines_ex(
                     Rectangle::new(px(*x), py(*y), w * s, h * s),
-                    1.5,
+                    0.08,
+                    8,
+                    (1.5 * s).max(1.0),
                     color(*c),
                 );
             }
@@ -104,20 +109,18 @@ pub fn draw(d: &mut RaylibDrawHandle, ui: &UiFrame, width: i32, height: i32) {
                 value,
                 color: c,
             } => {
-                d.draw_rectangle(
-                    px(*x) as i32,
-                    py(*y) as i32,
-                    (w * s) as i32,
-                    (h * s) as i32,
-                    Color::new(30, 40, 60, 200),
-                );
-                d.draw_rectangle(
-                    px(*x) as i32,
-                    py(*y) as i32,
-                    (w * s * value) as i32,
-                    (h * s) as i32,
-                    color(*c),
-                );
+                let background = Rectangle::new(px(*x), py(*y), w * s, h * s);
+                d.draw_rectangle_rounded(background, 0.7, 8, Color::new(22, 30, 48, 220));
+                let filled = Rectangle::new(px(*x), py(*y), w * s * value, h * s);
+                if filled.width > 0.5 {
+                    d.draw_rectangle_rounded(filled, 0.7, 8, color(*c));
+                    d.draw_rectangle_rounded(
+                        Rectangle::new(filled.x, filled.y, filled.width, filled.height * 0.35),
+                        0.7,
+                        8,
+                        Color::new(255, 255, 255, 42),
+                    );
+                }
             }
             UiElement::Circle { x, y, r, color: c } => {
                 d.draw_circle_v(Vector2::new(px(*x), py(*y)), r * s, color(*c));

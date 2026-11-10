@@ -139,7 +139,10 @@ pub struct RenderStats {
 /// Número de atributos interpolados por vértice:
 /// posición mundo (3), normal (3), posición local (3), uv (2), color (3).
 const ATTRS: usize = 14;
-const BAND_HEIGHT: usize = 16;
+// Bandas algo más pequeñas mantienen ocupadas CPUs con muchos hilos incluso
+// cuando la geometría se concentra en una zona de la pantalla.
+const BAND_HEIGHT: usize = 12;
+const MIN_VERTEX_TRIANGLES_PER_WORKER: usize = 2_048;
 
 #[derive(Clone, Copy)]
 struct ClipVertex {
@@ -225,7 +228,7 @@ impl SoftwareRenderer {
         let threads = std::thread::available_parallelism()
             .map(|n| n.get())
             .unwrap_or(4)
-            .clamp(1, 16);
+            .clamp(1, 64);
         let mut rng = crate::math3d::Rng::new(0x5EED_57A2);
         let stars = (0..2200)
             .map(|_| {
@@ -297,7 +300,10 @@ impl SoftwareRenderer {
         &self.camera
     }
     pub fn set_threads(&mut self, threads: usize) {
-        self.threads = threads.clamp(1, 32);
+        self.threads = threads.clamp(1, 64);
+    }
+    pub fn thread_count(&self) -> usize {
+        self.threads
     }
 
     pub fn set_sun_position(&mut self, position: Vec3) {
@@ -452,10 +458,16 @@ impl SoftwareRenderer {
 
         let triangles = &mesh.triangles;
         let counters = Counters::default();
-        if triangles.len() < 6000 || self.threads == 1 {
+        let vertex_workers = self
+            .threads
+            .min(triangles.len().div_ceil(MIN_VERTEX_TRIANGLES_PER_WORKER))
+            .max(1);
+        if vertex_workers == 1 || triangles.len() < 6000 {
             setup.process(triangles, target, &counters);
         } else {
-            let chunk = triangles.len().div_ceil(self.threads);
+            // Evita crear veinte hilos para mallas que solo pueden alimentar
+            // de forma eficiente a tres o cuatro trabajadores.
+            let chunk = triangles.len().div_ceil(vertex_workers);
             let results: Vec<Vec<ScreenTri>> = std::thread::scope(|scope| {
                 let handles: Vec<_> = triangles
                     .chunks(chunk)

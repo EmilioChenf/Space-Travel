@@ -4,4 +4,10 @@
 CMAKE_BUILD_PARALLEL_LEVEL = "1"
 
 [build]
+# raylib-sys recibe NUM_JOBS y falla en MSBuild cuando intenta lanzar los 20
+# trabajos a la vez. Esta limitación solo afecta su primera compilación; el
+# juego sí usa todos los procesadores lógicos durante el renderizado.
 jobs = 1
+# Genera instrucciones SIMD para la CPU local. El proyecto se distribuye como
+# código fuente, por lo que cada equipo obtiene un binario ajustado a su CPU.
+rustflags = ["-C", "target-cpu=native"]

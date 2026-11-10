@@ -19,8 +19,67 @@ use std::error::Error;
 use std::path::Path;
 use std::time::Instant;
 
-const RENDER_WIDTH: usize = 960;
-const RENDER_HEIGHT: usize = 540;
+const BALANCED_WIDTH: usize = 1152;
+const BALANCED_HEIGHT: usize = 648;
+const TARGET_FPS: u32 = 60;
+const RESOLUTION_LEVELS: [(usize, usize); 5] = [
+    (896, 504),
+    (960, 540),
+    (1024, 576),
+    (BALANCED_WIDTH, BALANCED_HEIGHT),
+    (1280, 720),
+];
+
+/// Escalado dinámico: conserva 60 FPS y usa la resolución más alta que la
+/// escena actual permite. Bajar es rápido para evitar tirones; subir exige
+/// varios segundos de margen estable para que la imagen no oscile.
+struct DynamicResolution {
+    level: usize,
+    slow_frames: u16,
+    fast_frames: u16,
+}
+
+impl DynamicResolution {
+    fn new() -> Self {
+        Self {
+            level: 3,
+            slow_frames: 0,
+            fast_frames: 0,
+        }
+    }
+
+    fn size(&self) -> (usize, usize) {
+        RESOLUTION_LEVELS[self.level]
+    }
+
+    fn observe(&mut self, render_ms: f32) -> Option<(usize, usize)> {
+        // Se reservan ~2 ms para subir el framebuffer a la GPU y dibujar HUD.
+        if render_ms > 13.5 {
+            self.slow_frames = self.slow_frames.saturating_add(1);
+            self.fast_frames = 0;
+        } else if render_ms < 8.5 {
+            self.fast_frames = self.fast_frames.saturating_add(1);
+            self.slow_frames = 0;
+        } else {
+            self.slow_frames = self.slow_frames.saturating_sub(1);
+            self.fast_frames = 0;
+        }
+
+        if self.slow_frames >= 8 && self.level > 0 {
+            self.level -= 1;
+            self.slow_frames = 0;
+            self.fast_frames = 0;
+            return Some(self.size());
+        }
+        if self.fast_frames >= 300 && self.level + 1 < RESOLUTION_LEVELS.len() {
+            self.level += 1;
+            self.slow_frames = 0;
+            self.fast_frames = 0;
+            return Some(self.size());
+        }
+        None
+    }
+}
 
 fn seed_from_env() -> u32 {
     std::env::var("SPACE_TRAVEL_SEED")
@@ -29,14 +88,8 @@ fn seed_from_env() -> u32 {
         .unwrap_or(DEFAULT_SEED)
 }
 
-fn render_size_from_env() -> (usize, usize) {
-    std::env::var("SPACE_TRAVEL_RES")
-        .ok()
-        .and_then(|s| {
-            let (w, h) = s.split_once('x')?;
-            Some((w.parse().ok()?, h.parse().ok()?))
-        })
-        .unwrap_or((RENDER_WIDTH, RENDER_HEIGHT))
+fn default_render_size() -> (usize, usize) {
+    (BALANCED_WIDTH, BALANCED_HEIGHT)
 }
 
 fn read_input(rl: &RaylibHandle) -> GameInput {
@@ -90,14 +143,15 @@ fn read_input(rl: &RaylibHandle) -> GameInput {
 }
 
 fn run_window() -> Result<(), Box<dyn Error>> {
-    let (render_width, render_height) = render_size_from_env();
+    let mut dynamic_resolution = DynamicResolution::new();
+    let (mut render_width, mut render_height) = dynamic_resolution.size();
     let (mut rl, thread) = raylib::init()
         .size(1280, 720)
         .title("Space Travel - Software Renderer en Rust")
         .resizable()
         .msaa_4x()
         .build();
-    rl.set_target_fps(60);
+    rl.set_target_fps(TARGET_FPS);
     rl.set_exit_key(None);
 
     let image = Image::gen_image_color(render_width as i32, render_height as i32, Color::BLACK);
@@ -129,6 +183,8 @@ fn run_window() -> Result<(), Box<dyn Error>> {
         };
         game.update(&input, dt);
         game.render(&mut renderer);
+        let stats = renderer.stats();
+        let next_resolution = dynamic_resolution.observe(stats.vertex_ms + stats.raster_ms);
         framebuffer.update_texture(renderer.pixels())?;
         let ui_frame = game.build_ui(&renderer);
 
@@ -165,6 +221,15 @@ fn run_window() -> Result<(), Box<dyn Error>> {
         {
             rl.take_screenshot(&thread, path);
             break;
+        }
+        if let Some((new_width, new_height)) = next_resolution {
+            let image = Image::gen_image_color(new_width as i32, new_height as i32, Color::BLACK);
+            let new_framebuffer = rl.load_texture_from_image(&thread, &image)?;
+            new_framebuffer.set_texture_filter(&thread, TextureFilter::TEXTURE_FILTER_BILINEAR);
+            framebuffer = new_framebuffer;
+            renderer = SoftwareRenderer::new(new_width, new_height);
+            render_width = new_width;
+            render_height = new_height;
         }
         game.record_frame_time(frame_start.elapsed().as_secs_f32());
     }
@@ -342,10 +407,11 @@ fn run_capture(
 }
 
 fn run_benchmark() -> Result<(), Box<dyn Error>> {
-    let (width, height) = render_size_from_env();
-    let mut renderer = SoftwareRenderer::new(width, height);
+    let (width, height) = default_render_size();
+    let renderer_probe = SoftwareRenderer::new(width, height);
     println!(
-        "Benchmark a {width}x{height}, {} hilos disponibles",
+        "Benchmark dinámico a 60 FPS (inicio {width}x{height}), {} hilos de render ({} lógicos disponibles)",
+        renderer_probe.thread_count(),
         std::thread::available_parallelism()
             .map(|n| n.get())
             .unwrap_or(1)
@@ -370,19 +436,43 @@ fn run_benchmark() -> Result<(), Box<dyn Error>> {
     for scene in scenes {
         let mut game = Game::new(Assets::load()?, seed_from_env());
         setup_scene(&mut game, scene);
+        let mut dynamic_resolution = DynamicResolution::new();
+        let (width, height) = dynamic_resolution.size();
+        let mut renderer = SoftwareRenderer::new(width, height);
+
+        // Da tiempo al controlador para encontrar la mayor resolución que
+        // conserva margen antes de iniciar la medición.
+        for _ in 0..30 {
+            game.update(&GameInput::default(), 1.0 / 60.0);
+            game.render(&mut renderer);
+            let stats = renderer.stats();
+            if let Some((new_width, new_height)) =
+                dynamic_resolution.observe(stats.vertex_ms + stats.raster_ms)
+            {
+                renderer = SoftwareRenderer::new(new_width, new_height);
+            }
+        }
         let frames = 30;
         let start = Instant::now();
         let mut tris = 0;
         for _ in 0..frames {
             game.update(&GameInput::default(), 1.0 / 60.0);
             game.render(&mut renderer);
+            let stats = renderer.stats();
+            if let Some((new_width, new_height)) =
+                dynamic_resolution.observe(stats.vertex_ms + stats.raster_ms)
+            {
+                renderer = SoftwareRenderer::new(new_width, new_height);
+            }
             tris += renderer.stats().rasterized_triangles;
         }
         let ms = start.elapsed().as_secs_f32() * 1000.0 / frames as f32;
         total += ms;
         println!(
-            "{scene:>18}: {ms:6.1} ms/cuadro ({:5.1} FPS)  tris rasterizados/cuadro {}",
+            "{scene:>18}: {ms:6.1} ms/cuadro ({:5.1} FPS)  {}x{}  tris/cuadro {}",
             1000.0 / ms,
+            renderer.width(),
+            renderer.height(),
             tris / frames
         );
     }
@@ -403,14 +493,38 @@ fn main() -> Result<(), Box<dyn Error>> {
             let width = args
                 .get(4)
                 .and_then(|v| v.parse().ok())
-                .unwrap_or(RENDER_WIDTH);
+                .unwrap_or(BALANCED_WIDTH);
             let height = args
                 .get(5)
                 .and_then(|v| v.parse().ok())
-                .unwrap_or(RENDER_HEIGHT);
+                .unwrap_or(BALANCED_HEIGHT);
             run_capture(scene, Path::new(path), width, height)
         }
         Some("--benchmark") => run_benchmark(),
         _ => run_window(),
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn dynamic_resolution_starts_balanced_and_lowers_quickly() {
+        let mut quality = DynamicResolution::new();
+        assert_eq!(quality.size(), (1152, 648));
+        for _ in 0..7 {
+            assert_eq!(quality.observe(20.0), None);
+        }
+        assert_eq!(quality.observe(20.0), Some((1024, 576)));
+    }
+
+    #[test]
+    fn dynamic_resolution_only_raises_after_stable_headroom() {
+        let mut quality = DynamicResolution::new();
+        for _ in 0..299 {
+            assert_eq!(quality.observe(5.0), None);
+        }
+        assert_eq!(quality.observe(5.0), Some((1280, 720)));
     }
 }

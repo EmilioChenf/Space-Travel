@@ -11,4 +11,7 @@ raylib = { version = "6.0.0", features = ["SUPPORT_IMAGE_GENERATION"] }
 opt-level = 1
 
 [profile.release]
-lto = "thin"
+opt-level = 3
+lto = "fat"
+codegen-units = 1
+strip = "debuginfo"
