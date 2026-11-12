@@ -239,36 +239,3 @@ reproducibles, los cinco minijuegos y los estados del juego (menú, pausa,
 warp, no atravesar planetas, minijuego completo). Las pruebas no sustituyen
 la revisión visual: se revisaron las capturas de `docs/capturas`.
 
-## Integrantes y contribuciones
-
-Según el historial del repositorio: **EmilioChenf**, **ESJ0** y
-**zoomjosue**. Según los commits, ESJ0 subió la primera versión del
-renderizador y los modelos del DeLorean, Hielo y Oasis (exportados desde
-Blender). Completa aquí el nombre completo,
-carné y aporte de cada integrante antes de la entrega.
-
-## Recursos externos
-
-- raylib / raylib-rs (licencia zlib) para ventana y entrada.
-- Los modelos del DeLorean, Hielo y Oasis los hizo el equipo en Blender.
-- Los demás modelos se generaron con código (`src/procgen.rs`,
-  `src/worlds.rs`); **no** se crearon en Blender. Son OBJ/MTL estándar que
-  se pueden importar en Blender.
-
-## Asistencia de IA
-
-Se usó Claude (Anthropic) como asistente para auditar el código, escribir la
-generación procedural de modelos, ampliar el renderizador, la lógica del
-juego, las pruebas y esta documentación. El equipo revisó y validó el
-resultado.
-
-## Limitaciones conocidas
-
-- **El video de demostración aún no está grabado**: la guía está en
-  `docs/VIDEO_DEMO.md`. Es un requisito obligatorio de la entrega.
-- La resolución 3D puede bajar temporalmente en escenas pesadas para mantener
-  60 FPS; el HUD conserva siempre la resolución completa de la ventana.
-- La fuente por defecto de raylib solo tiene ASCII: el HUD omite acentos.
-- La colisión con la superficie usa una rejilla conservadora de alturas
-  máximas, así que la nave flota un poco sobre árboles y edificios.
-- No hay audio.
