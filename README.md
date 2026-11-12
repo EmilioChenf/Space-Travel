@@ -169,6 +169,27 @@ alcanzan pilotando la nave. Pulsa `M` cerca del planeta.
    con prueba de profundidad y **postproceso** (resplandor solar, distorsión
    por calor, escarcha, daño, destello, fundido y viñeta).
 
+## Video de demostración
+
+[`docs/video/space_travel_demo.mp4`](docs/video/space_travel_demo.mp4)
+(3 min 15 s, 1280x720, 30 FPS) muestra el recorrido completo: menú,
+cinemática de despegue, controles, vuelo espacial, vista del sistema solar,
+acercamiento a Fuego, vuelta completa alrededor del planeta, alejamiento,
+warp a los demás planetas, las tres cámaras y los contadores `F3` de LOD y
+culling. Tiene subtítulos que explican cada parte.
+
+Se grabó con el juego real usando `src/bin/grabar_video.rs`: un guion envía
+las mismas entradas que el teclado (un piloto automático sencillo calcula
+guiñada, cabeceo, empuje y cámara) con un paso fijo de 1/30 s, y cada cuadro
+del renderizador por software y del HUD se envía a ffmpeg. Diferencias con
+jugar a mano: durante 9 s el tiempo va x24 (avisado en pantalla) para que se
+note la órbita, y en ese tramo los meteoritos se desactivan. Para volver a
+grabarlo (requiere ffmpeg; en Linux sin pantalla, `xvfb-run`):
+
+```bash
+cargo run --release --bin grabar_video -- docs/video/space_travel_demo.mp4
+```
+
 ## Características de la rúbrica
 
 El estado detallado, con archivos responsables y evidencia, está en
@@ -264,8 +285,6 @@ resultado.
 
 ## Limitaciones conocidas
 
-- **El video de demostración aún no está grabado**: la guía está en
-  `docs/VIDEO_DEMO.md`. Es un requisito obligatorio de la entrega.
 - La resolución 3D puede bajar temporalmente en escenas pesadas para mantener
   60 FPS; el HUD conserva siempre la resolución completa de la ventana.
 - La fuente por defecto de raylib solo tiene ASCII: el HUD omite acentos.

@@ -41,6 +41,7 @@ struct Recorder {
     game: Game,
     window: Option<Window>,
     frames: u64,
+    skip_seconds: f32,
 }
 
 /// Resultado del guion para un cuadro.
@@ -125,6 +126,10 @@ impl Recorder {
         let Some(w) = &mut self.window else {
             return Ok(());
         };
+        // Vista previa: DESDE=<segundos> solo graba a partir de ese punto.
+        if (self.frames as f32) < self.skip_seconds * FPS as f32 {
+            return Ok(());
+        }
         self.game.render(&mut w.renderer);
         w.framebuffer.update_texture(w.renderer.pixels())?;
         let ui_frame = self.game.build_ui(&w.renderer);
@@ -277,6 +282,10 @@ fn run(output: Option<&str>) -> Result<(), Box<dyn Error>> {
         game: Game::new(Assets::load()?, seed),
         window,
         frames: 0,
+        skip_seconds: std::env::var("DESDE")
+            .ok()
+            .and_then(|v| v.parse().ok())
+            .unwrap_or(0.0),
     };
 
     // 1. Menú principal.
@@ -344,7 +353,9 @@ fn run(output: Option<&str>) -> Result<(), Box<dyn Error>> {
     })?;
 
     // 4. Subir para ver el sistema solar completo.
-    let lookout = Vec3::new(96.0, 290.0, 470.0);
+    let lookout = Vec3::new(40.0, 230.0, 330.0);
+    // Apuntar por debajo del Sol deja el Sol arriba de la nave en pantalla.
+    let below_sun = Vec3::new(0.0, -110.0, 0.0);
     rec.segment("mirador", 16.0, 1, |game, _| {
         let to = lookout - game.ship.position;
         Step {
@@ -355,7 +366,7 @@ fn run(output: Option<&str>) -> Result<(), Box<dyn Error>> {
     })?;
     let mut first = true;
     rec.segment("frenar", 3.5, 1, |game, _| {
-        let mut input = fly_towards(game, -game.ship.position, 0.0, false);
+        let mut input = fly_towards(game, below_sun - game.ship.position, 0.0, false);
         input.flight.brake = true;
         input.toggle_orbits = std::mem::take(&mut first);
         step(input, "Sol, nave y 6 planetas. O muestra las orbitas")
@@ -363,7 +374,7 @@ fn run(output: Option<&str>) -> Result<(), Box<dyn Error>> {
 
     // 5. Tiempo acelerado para que se note la órbita y la rotación.
     rec.segment("acelerado", 9.0, 24, |game, _| {
-        let mut input = fly_towards(game, -game.ship.position, 0.0, false);
+        let mut input = fly_towards(game, below_sun - game.ship.position, 0.0, false);
         input.flight.brake = true;
         step(
             input,
@@ -393,9 +404,19 @@ fn run(output: Option<&str>) -> Result<(), Box<dyn Error>> {
 
     // 7. Vuelta completa alrededor de Fuego.
     let mut orbiter = Orbiter::new(fuego, 9.0);
-    rec.segment("vuelta", 60.0, 1, |game, _| {
-        let input = orbiter.input(game, true);
-        let caption = if orbiter.angle < 2.2 {
+    rec.segment("vuelta", 60.0, 1, |game, t| {
+        let mut input = orbiter.input(game, true);
+        // C dos veces: cámara orbital, elevada y alejada para ver el planeta.
+        input.cycle_camera = t < DT * 0.5 || (0.3..0.3 + DT).contains(&t);
+        if (0.5..1.5).contains(&t) {
+            input.camera.orbit_pitch = 0.02;
+        }
+        if (0.5..1.3).contains(&t) {
+            input.camera.zoom = -0.4;
+        }
+        let caption = if t < 2.5 {
+            "Camara orbital (C) para ver la vuelta alrededor del planeta"
+        } else if orbiter.angle < 2.2 {
             "Vuelta completa a Fuego: volcanes y rios de lava hechos con ruido"
         } else if orbiter.angle < 4.4 {
             "Shader de lava animado: el ruido se desplaza con el tiempo"
@@ -410,10 +431,14 @@ fn run(output: Option<&str>) -> Result<(), Box<dyn Error>> {
     })?;
 
     // 8. Alejamiento.
-    rec.segment("alejamiento", 8.0, 1, |game, _| {
+    rec.segment("alejamiento", 8.0, 1, |game, t| {
         let away = game.ship.position - planet_position(fuego, game.sim_time);
+        let mut input = fly_towards(game, away, 1.0, true);
+        // La cámara orbital sigue mostrando el planeta; al final vuelve a
+        // tercera persona.
+        input.cycle_camera = (7.8..7.8 + DT).contains(&t);
         step(
-            fly_towards(game, away, 1.0, true),
+            input,
             "Alejamiento: al salir de la zona cercana vuelve la velocidad maxima",
         )
     })?;

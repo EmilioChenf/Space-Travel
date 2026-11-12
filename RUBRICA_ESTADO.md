@@ -19,7 +19,7 @@ catedrático.
 | Prueba de profundidad | Cumplido | `renderer.rs` (Z-buffer 1/w en visibility buffer) | `depth_test_keeps_the_nearest_surface_regardless_of_order`, `particles_respect_depth` |
 | Al menos un shader propio | Cumplido (18) | `shaders.rs` | `shaders_produce_distinct_results_for_the_same_fragment`, `lava_changes_over_time` |
 | Código, recursos e instrucciones | Cumplido | repositorio, `LEEME.md` | — |
-| **Video de demostración** | **PENDIENTE** | equipo | Guía en `docs/VIDEO_DEMO.md`. Sin video, la guía indica 0 puntos |
+| Video de demostración | Cumplido | `src/bin/grabar_video.rs` | `docs/video/space_travel_demo.mp4`: vuelo, acercamiento, vuelta a Fuego y alejamiento |
 
 ## Menú de puntos
 
@@ -30,12 +30,12 @@ catedrático.
 | Renderizado | 60 | Recorte de plano cercano, culling por frustum, por tamaño y de caras traseras, LOD por agrupamiento de vértices, visibility buffer con sombreado diferido, raster multihilo por bandas, corrección de perspectiva, 18 shaders, prueba alfa, mezcla aditiva, partículas con profundidad, postproceso (resplandor, calor, escarcha, daño), estrellas | `renderer.rs`, `shaders.rs`, `model.rs` | `renderer::tests::*`, `shaders::tests::*`, `decimation_reduces_triangles_and_keeps_bounds`; `F3` en el juego | 50 |
 | Navegación | 30 | 3 cámaras con transiciones, warp animado a cada planeta, navegación cercana con límite de velocidad, nivelación respecto a la superficie, colisiones, objetivo con flecha, radar | `camera.rs`, `ship.rs`, `game.rs` | `camera::tests::*`, `ship::tests::*`, `skip_launch_and_warp_to_each_planet_without_scene_change`; capturas `primera_persona.jpg`, `orbital.jpg` | 30 |
 | Rendimiento | 15 | Resolución dinámica automática a 60 FPS; medido: 86,9 FPS de media en 14 escenas con 20 hilos, mínimo 66,9 FPS | `renderer.rs`, `main.rs --benchmark` | Tabla del `LEEME.md` | 10 |
-| Presentación | 10 | Menú, controles, créditos, pausa, HUD, cinemática de despegue, transiciones, pantallas de victoria/derrota. Falta el video | `game.rs`, `ui.rs`, `launch.rs` | Capturas `menu.jpg`, `cuenta.jpg`, `separacion.jpg` | 7 |
+| Presentación | 10 | Menú, controles, créditos, pausa, HUD, cinemática de despegue, transiciones, pantallas de victoria/derrota. Video de demostración | `game.rs`, `ui.rs`, `launch.rs` | Capturas `menu.jpg`, `cuenta.jpg`, `separacion.jpg` | 7 |
 | **Total** | **200 (máx. 100)** | | | | **177 → 100** |
 
 Aunque se baje mucho la estimación de cada categoría, el total sigue por
-encima de 100. **Ningún punto vale sin el video de demostración**, que el
-equipo todavía tiene que grabar.
+encima de 100. El video de demostración está en
+`docs/video/space_travel_demo.mp4`.
 
 ## Funcionalidades adicionales (fuera de rúbrica)
 
